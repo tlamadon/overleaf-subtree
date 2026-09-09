@@ -12,7 +12,8 @@ myrepo/
 
 ## Why this exists
 
-Every other Overleaf sync tool assumes the repository root *is* the project
+The existing sync tools — Overleaf's own integrations included, see
+[Alternatives](#alternatives) — assume the repository root *is* the project
 root. That excludes the common case where a manuscript lives inside a code
 repository, next to the scripts that generate its numbers and figures — where
 you want the paper versioned alongside the code that produces it.
@@ -115,12 +116,51 @@ fatal: cache for <sha> already exists!
 and clearing the cache does not help, because the twins are in the history.
 This tool exists partly because that happened.
 
+## Alternatives
+
+This is a small tool in a crowded space, and for most people one of these is the
+better answer. The distinction that matters is **what it talks to**: Overleaf's
+git remote (needs a paid plan, but it is real git) or the web API behind the
+editor (works on a free account, but is unofficial and breaks when the site
+changes).
+
+**Start with Overleaf's own integrations.** The
+[git integration](https://docs.overleaf.com/integrations-and-add-ons/git-integration-and-github-synchronization/git-integration)
+gives the project a git remote, and
+[GitHub synchronization](https://docs.overleaf.com/integrations-and-add-ons/git-integration-and-github-synchronization)
+links it to a repo without any local tooling. Both are paid. If the repo root
+*is* the project root and you don't need a review step, you need nothing else.
+
+Over the git remote:
+
+| | |
+|---|---|
+| [overleaf-git-sync](https://github.com/genggng/overleaf-git-sync) | The closest thing to this tool, and more mature. Imports the project into a managed branch, so git does the conflict detection, and `push --dry-run` previews before writing. Assumes repo root = project root. |
+| [overleaf_sync_with_git](https://github.com/subhamX/overleaf_sync_with_git) | Aimed at automated backup and CI rather than interactive coauthoring; also works with self-hosted instances. |
+| [olgitbridge](https://github.com/chazeon/olgitbridge) · [overleaf-gitbridge](https://github.com/camillemndn/overleaf-gitbridge) | For self-hosted Overleaf CE, which has no git bridge of its own. |
+
+Over the web API, no paid plan needed:
+
+| | |
+|---|---|
+| [overleaf-sync](https://github.com/moritzgloeckl/overleaf-sync) | The established one (~390 stars). Cookie auth via a browser popup, whole-project sync with `.olignore`. Last released 2024. |
+| [LocalLeaf](https://github.com/jazielloureiro/LocalLeaf) | A maintained fork of the above, if it has stopped working for you. |
+| [overleaf-sync-rs](https://github.com/katzper-michno/overleaf-sync-rs) | Same idea in Rust. |
+
+**Why this one exists.** None of the above map a *subdirectory* onto the project
+root, so none of them fit a manuscript that lives inside a code repository next
+to the scripts generating its figures. That is the whole reason for this tool;
+if your paper is its own repo, you do not need it. The push review is a second,
+smaller reason — `overleaf-git-sync` also confirms before writing, but here each
+modified and deleted file is annotated with who last touched it on Overleaf, and
+`repo_owned` marks the generated files where a coauthor's edit is about to be
+overwritten.
+
 ## Limits
 
-- Overleaf's git integration is a paid feature; there is no web-API backend.
-  If you need one, see [olsync](https://github.com/moritzgloeckl/overleaf-sync)
-  or [overleaf-git-sync](https://github.com/genggng/overleaf-git-sync), neither
-  of which supports subdirectory mapping.
+- Overleaf's git integration is a paid feature; this tool has no web-API
+  backend and will not get one. If you need to work from a free account, use
+  one of the web-API tools above.
 - Untracked files under the prefix are never published. `status` lists them.
 - Conflicts are resolved by you, in the working tree, with git. The tool will
   not merge unattended.
