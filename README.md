@@ -15,13 +15,53 @@ myrepo/
 The existing sync tools — Overleaf's own integrations included, see
 [Alternatives](#alternatives) — assume the repository root *is* the project
 root. That excludes the common case where a manuscript lives inside a code
-repository, next to the scripts that generate its numbers and figures — where
-you want the paper versioned alongside the code that produces it.
+repository, next to the scripts that generate its numbers and figures, where you
+want the paper versioned alongside the code that produces it. Publishing from
+there means a push can quietly overwrite a coauthor who was editing in the
+browser an hour ago.
 
-The second thing it does is refuse to publish blind. A push overwrites whatever
-your coauthors currently have, so `push` prints the additions, modifications and
-deletions first, annotates each modification and deletion with **who last
-touched that file on Overleaf and when**, and asks.
+What this tool does about that:
+
+**Overleaf as a subtree.** One `prefix` in the config maps a subdirectory onto
+the project root. The paper stays inside your repo, versioned in the same
+history as the code that generates it; Overleaf still sees a project whose root
+is `paper.tex`. Nothing about your repo layout has to change to suit the editor.
+
+**A history that stays clean.** Pull is a real `git merge -Xsubtree`, so your
+coauthors' commits enter your history under their own names and git does the
+conflict detection. Push sends a *single* commit built from the prefix's tree
+with `git commit-tree`, parented on the project's current tip — fast-forward by
+construction. The tempting alternative, publishing a rewritten history with
+`git subtree split`, poisons the repository permanently; see
+[Design](#design-merge-history-in-publish-trees-out) for the failure mode that
+prompted this tool.
+
+**Verify before publishing.** A push overwrites whatever your coauthors
+currently have, so `push` prints the additions, modifications and deletions
+first, annotates each modification and deletion with **who last touched that
+file on Overleaf and when**, and asks — with `d` to page through the full diff
+before deciding.
+
+**Checks that gate the push.** Configure any commands you like — compile the
+document, grep the log for undefined references, run a linter. A non-zero exit
+blocks publishing, so a manuscript that does not build never reaches your
+coauthors. `olsub check` runs them without touching the network.
+
+**Generated files are called out by name.** Mark the paths your repo produces as
+`repo_owned`. When someone edits one in the browser, that edit is doomed — the
+next generator run overwrites it — so `status` and `push` list them apart from
+ordinary content, and `pull` reminds you to look before regenerating.
+
+**It refuses to act when the situation is ambiguous.** Push aborts if Overleaf
+has commits you have not merged, rather than discarding them. Both `pull` and
+`push` refuse to run against a dirty prefix or staged changes. Untracked files
+are never published, and `status` lists them so their absence is not a
+surprise.
+
+**Plain git underneath.** No web API, no scraping, no cookie jar, and no
+dependencies beyond the standard library. Authentication is whatever your git
+credential helper already does, and every command is one you could have typed
+yourself.
 
 ## Install
 
