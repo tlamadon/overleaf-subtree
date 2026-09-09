@@ -25,7 +25,7 @@ touched that file on Overleaf and when**, and asks.
 ## Install
 
 ```sh
-uv tool install git+https://github.com/<you>/overleaf-subtree
+uv tool install git+https://github.com/tlamadon/overleaf-subtree
 ```
 
 Then, once per project:
@@ -81,7 +81,7 @@ olsub push      # review the outgoing change, confirm, publish
 This push would change the Overleaf project as follows.
 
   add     notes/appendix.tex
-  MODIFY  paper.tex                    (there: magne.mogstad, 2 hours ago)
+  MODIFY  paper.tex                    (there: your.coauthor, 2 hours ago)
   DELETE  graphs/old-figure.tex        (there: never touched there)
 
  3 files changed, 41 insertions(+), 12 deletions(-)
