@@ -3,6 +3,8 @@ name = "overleaf-subtree"
 version = "0.1.0"
 description = "Mirror a subdirectory of a git repo onto an Overleaf project root, with a review gate before publishing"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = []
 
