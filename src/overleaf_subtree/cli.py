@@ -67,7 +67,7 @@ def cmd_status(args) -> int:
     n_behind = g.behind(root, ref)
     print(f"  behind  {n_behind} commit(s) on Overleaf not yet ingested\n")
     if n_behind:
-        print("Incoming -- run 'olsub pull':")
+        print("Incoming -- run 'subleaf pull':")
         for line in g.incoming(root, ref):
             print(f"    {line}")
         print()
@@ -173,7 +173,7 @@ def cmd_push(args) -> int:
 
     if not g.remote_is_ancestor(root, ref):
         print("\nOverleaf has commits this branch has not ingested, so publishing\n"
-              "would discard them.  Run 'olsub pull', resolve, re-check, retry.",
+              "would discard them.  Run 'subleaf pull', resolve, re-check, retry.",
               file=sys.stderr)
         return 1
 
@@ -218,7 +218,7 @@ def cmd_push(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="olsub",
+        prog="subleaf",
         description="Mirror a subdirectory of this repo onto an Overleaf "
                     "project root, with a review gate before publishing.",
     )

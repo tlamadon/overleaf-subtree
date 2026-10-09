@@ -45,7 +45,7 @@ before deciding.
 **Checks that gate the push.** Configure any commands you like — compile the
 document, grep the log for undefined references, run a linter. A non-zero exit
 blocks publishing, so a manuscript that does not build never reaches your
-coauthors. `olsub check` runs them without touching the network.
+coauthors. `subleaf check` runs them without touching the network.
 
 **Generated files are called out by name.** Mark the paths your repo produces as
 `repo_owned`. When someone edits one in the browser, that edit is doomed — the
@@ -69,7 +69,8 @@ yourself.
 uv tool install git+https://github.com/tlamadon/overleaf-subtree
 ```
 
-Then, once per project:
+This installs the `subleaf` command (sub*tree* + Over*leaf*). Then, once per
+project:
 
 ```sh
 git remote add overleaf https://git@git.overleaf.com/<project-id>
@@ -109,11 +110,11 @@ Nothing in the tool knows about LaTeX. The checks are yours.
 ## Use
 
 ```sh
-olsub status    # what is unmerged, and what a push would change
-olsub diff      # full content diff against the project
-olsub pull      # merge the project's commits into this repo
-olsub check     # run the checks, no network
-olsub push      # review the outgoing change, confirm, publish
+subleaf status    # what is unmerged, and what a push would change
+subleaf diff      # full content diff against the project
+subleaf pull      # merge the project's commits into this repo
+subleaf check     # run the checks, no network
+subleaf push      # review the outgoing change, confirm, publish
 ```
 
 `push` shows:

@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
-olsub = "overleaf_subtree.cli:main"
+subleaf = "overleaf_subtree.cli:main"
 
 [build-system]
 requires = ["hatchling"]
