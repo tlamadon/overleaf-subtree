@@ -10,6 +10,18 @@ myrepo/
   .overleaf-subtree.toml
 ```
 
+## Bird's-eye view
+
+Two commands cover most of what you will do:
+
+- **`subleaf pull`** gets the latest version from Overleaf and merges it into your
+  repo.
+- **`subleaf push`** uploads your local version to Overleaf. Before it does, it
+  makes sure nothing has changed on Overleaf that you haven't seen. If a
+  coauthor has edited the project since your last pull, the push stops and asks
+  you to pull first, so their changes get merged in before anything is
+  overwritten.
+
 ## Why this exists
 
 The existing sync tools — Overleaf's own integrations included, see
