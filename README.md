@@ -129,6 +129,9 @@ subleaf check     # run the checks, no network
 subleaf push      # review the outgoing change, confirm, publish
 ```
 
+`push --dry-run` runs the checks and prints the review, then stops. `push
+--yes` skips the confirmation.
+
 `push` shows:
 
 ```

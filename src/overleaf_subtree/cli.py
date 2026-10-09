@@ -191,11 +191,19 @@ def cmd_push(args) -> int:
                  f"would be replaced.", YELLOW))
     print(f"\n{g.shortstat(root, ref, cfg.prefix)}\n")
 
+    if args.dry_run:
+        print("Dry run; nothing was pushed.  Rerun with --yes to publish.")
+        return 0
     if args.yes:
         reply = "y"
     else:
         while True:
-            reply = input("Push to Overleaf? [y/N/d=show full diff] ").strip() or "N"
+            try:
+                reply = input("Push to Overleaf? [y/N/d=show full diff] ").strip() or "N"
+            except EOFError:
+                print("\nNo terminal to confirm on; nothing was pushed.  Review with "
+                      "--dry-run, then publish with --yes.", file=sys.stderr)
+                return 1
             if reply.lower() == "d":
                 pager = os.environ.get("PAGER", "less -R")
                 subprocess.run(f"{pager}", shell=True, text=True,
@@ -233,6 +241,8 @@ def build_parser() -> argparse.ArgumentParser:
     push = sub.add_parser("push", help="review the outgoing change, then publish")
     push.add_argument("--yes", action="store_true", help="skip the confirmation")
     push.add_argument("--no-check", action="store_true", help="skip the checks")
+    push.add_argument("--dry-run", action="store_true",
+                      help="run the checks and show the review, then stop")
 
     return p
 
