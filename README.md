@@ -23,6 +23,19 @@ After that, two commands cover most of what you will do:
   you to pull first, so their changes get merged in before anything is
   overwritten.
 
+**Setting up with an agent.** In Claude Code or Codex, open your repository and
+paste:
+
+```
+Set up Overleaf syncing for this repository with subleaf, following
+https://raw.githubusercontent.com/tlamadon/overleaf-subtree/main/SETUP.md
+```
+
+The agent installs `subleaf`, asks for your Overleaf project link, helps you
+create and store an Overleaf git token, and connects the two. After that, ask
+it to "pull from Overleaf" or "push to Overleaf". [SETUP.md](SETUP.md) is the
+script it follows.
+
 ## Why this exists
 
 The existing sync tools — Overleaf's own integrations included, see
@@ -83,7 +96,8 @@ uv tool install git+https://github.com/tlamadon/overleaf-subtree
 ```
 
 This installs the `subleaf` command (sub*tree* + Over*leaf*). Then, once per
-project, from inside your repository:
+project, from inside your repository (or let an agent do all of this; see
+[Setting up with an agent](#birds-eye-view)):
 
 ```sh
 subleaf init
