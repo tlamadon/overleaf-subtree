@@ -132,6 +132,7 @@ Nothing in the tool knows about LaTeX. The checks are yours.
 
 ```sh
 subleaf status    # what is unmerged, and what a push would change
+                  #   --short: one line; --json: everything; --cached: no network
 subleaf diff      # full content diff against the project
 subleaf pull      # merge the project's commits into this repo
 subleaf check     # run the checks, no network
@@ -154,6 +155,47 @@ This push would change the Overleaf project as follows.
 
 Push to Overleaf? [y/N/d=show full diff]
 ```
+
+## Using it from a coding agent
+
+Claude Code and Codex can both drive `subleaf`, and see where the paper stands
+at the start of every session. Set that up once per repository:
+
+```sh
+subleaf agent-setup
+```
+
+(`subleaf init` offers to do this at the end.) It writes:
+
+- **A session-start hook** in `.claude/settings.json` and `.codex/hooks.json`
+  that runs `subleaf status --short`. Its output goes into the agent's context,
+  so before touching the paper the agent already knows something like
+
+  ```
+  Overleaf: 2 new commits to pull (jane, 3h ago: main.tex, intro.tex) · 1 file to push (appendix.tex) · both sides changed, pull before pushing
+  ```
+
+  and can tell you, rather than editing a stale copy. The hook is silent in
+  repositories without `subleaf`, never prompts for credentials, and gives up on
+  the network after ten seconds, falling back to the last fetch. Codex also
+  needs `[features] hooks = true` in `.codex/config.toml`, which this adds, and
+  asks once to trust the project's hooks.
+- **Instructions** in `CLAUDE.md` and `AGENTS.md`, between `subleaf` markers, on
+  how to pull and push. An agent cannot answer push's `y/N` prompt (without a
+  terminal, `push` stops with nothing published), so it shows you the review
+  with `subleaf push --dry-run` and publishes with `--yes` only after you approve.
+
+Existing settings and instructions are added to, never replaced, and rerunning
+it is safe. Commit the files so your coauthors' agents get them too.
+
+`--statusline` also shows the line under the prompt in Claude Code's status line
+(`subleaf status --short --cached`, which reads the last fetch rather than
+contacting Overleaf on every refresh). It leaves an existing status line alone.
+Codex's status line takes only built-in items, so there the hook is all there is.
+
+For anything beyond one line, `subleaf status --json` reports the incoming
+commits and files, the outgoing changes with who last touched each file on
+Overleaf, and the warnings, as structured data.
 
 ## Design: merge history in, publish trees out
 

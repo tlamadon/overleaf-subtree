@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import json
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
+from . import agents
 from . import gitops as g
+from . import report
 from .config import CONFIG_NAME, Config, ConfigError, find_root, load, read_raw, render
 
 RESET, BOLD, RED, YELLOW, DIM = "\033[0m", "\033[1m", "\033[31m", "\033[33m", "\033[2m"
@@ -145,12 +148,23 @@ def cmd_init(args) -> int:
 
     print("\nDone.  'subleaf pull' brings in Overleaf edits; 'subleaf push' publishes "
           f"yours.\nTo run checks before every push, edit {CONFIG_NAME}.")
+
+    if args.agents or (sys.stdin.isatty() and _ask(
+            "\nLet Claude Code and Codex see the Overleaf status at the start of "
+            "each session (y/n)", "y").lower().startswith("y")):
+        print()
+        args.statusline = False
+        return cmd_agent_setup(args)
+    print("To let coding agents see the Overleaf status, run 'subleaf agent-setup'.")
     return 0
 
 
 def cmd_status(args) -> int:
+    if args.short or args.json:
+        return _status_for_machines(args)
     root, cfg = _setup(args)
-    g.fetch(root, cfg.remote, cfg.branch)
+    if not args.cached:
+        g.fetch(root, cfg.remote, cfg.branch)
     ref = cfg.remote_ref
 
     head = g.git("log", "-1", "--format=%h  %s  (%an, %ar)", ref, cwd=root)
@@ -195,6 +209,30 @@ def cmd_status(args) -> int:
         print(f"\n{cfg.prefix}/ has untracked files -- these will NOT be published:")
         for p in untracked[:10]:
             print(f"    {p}")
+    return 0
+
+
+def _status_for_machines(args) -> int:
+    """Run from hooks and status bars: never prompts, never fails loudly,
+    and prints nothing at all outside a repo set up for subleaf."""
+    try:
+        root, cfg = _setup(args)
+    except (ConfigError, g.GitError):
+        return 0
+    r = report.gather(root, cfg, fetch=not args.cached)
+    print(json.dumps(r, indent=2) if args.json else r["summary"])
+    return 0
+
+
+def cmd_agent_setup(args) -> int:
+    root = find_root(Path(args.directory) if args.directory else None)
+    cfg = load(root)
+    print("Connecting coding agents to subleaf:")
+    for line in agents.setup(root, cfg.prefix, statusline=args.statusline):
+        print(line)
+    print("\nCommit these files so your coauthors' agents pick them up too.  "
+          "Codex asks once\nto trust the project's hooks; the hook runs "
+          f"'{agents.HOOK_COMMAND}'.")
     return 0
 
 
@@ -339,8 +377,21 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--prefix", help="subdirectory that maps onto the project")
     init.add_argument("--remote", help="git remote name (default: overleaf)")
     init.add_argument("--branch", help="remote branch (default: detected)")
+    init.add_argument("--agents", action="store_true",
+                      help="also run agent-setup, without asking")
 
-    sub.add_parser("status", help="what is unmerged, and what a push would change")
+    status = sub.add_parser("status", help="what is unmerged, and what a push would change")
+    status.add_argument("--short", action="store_true",
+                        help="one line, for an agent's context or a status bar")
+    status.add_argument("--json", action="store_true", help="everything, as JSON")
+    status.add_argument("--cached", action="store_true",
+                        help="don't contact Overleaf; use the last fetch")
+
+    agent = sub.add_parser("agent-setup",
+                           help="show Claude Code and Codex the Overleaf status")
+    agent.add_argument("--statusline", action="store_true",
+                       help="also show it in Claude Code's status line")
+
     sub.add_parser("diff", help="full content diff against the project")
     sub.add_parser("pull", help="merge the project's commits into this repo")
     sub.add_parser("check", help="run the configured checks")
@@ -357,7 +408,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handler = {
-        "init": cmd_init, "status": cmd_status, "diff": cmd_diff, "pull": cmd_pull,
+        "init": cmd_init, "status": cmd_status, "agent-setup": cmd_agent_setup,
+        "diff": cmd_diff, "pull": cmd_pull,
         "check": cmd_check, "push": cmd_push,
     }[args.command]
     try:

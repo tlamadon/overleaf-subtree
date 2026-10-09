@@ -15,7 +15,9 @@ and no amount of cache clearing helps because the twins are in the history.
 """
 from __future__ import annotations
 
+import os
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,13 +26,19 @@ class GitError(RuntimeError):
     pass
 
 
-def git(*args: str, cwd: Path, check: bool = True, capture: bool = True) -> str:
-    proc = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        text=True,
-        capture_output=capture,
-    )
+def git(*args: str, cwd: Path, check: bool = True, capture: bool = True,
+        timeout: float | None = None, env: dict | None = None) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            text=True,
+            capture_output=capture,
+            timeout=timeout,
+            env={**os.environ, **env} if env else None,
+        )
+    except subprocess.TimeoutExpired:
+        raise GitError(f"git {' '.join(args)} timed out after {timeout:g}s") from None
     if check and proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()
         raise GitError(f"git {' '.join(args)} failed:\n{detail}")
@@ -86,8 +94,20 @@ def tracked_in_prefix(root: Path, prefix: str) -> bool:
     return bool(git("ls-files", "--", prefix, cwd=root))
 
 
-def fetch(root: Path, remote: str, branch: str) -> None:
-    git("fetch", "-q", remote, branch, cwd=root)
+def fetch(root: Path, remote: str, branch: str, *, timeout: float | None = None,
+          prompt: bool = True) -> None:
+    """``prompt=False`` fails instead of asking for credentials, for hooks."""
+    git("fetch", "-q", remote, branch, cwd=root, timeout=timeout,
+        env=None if prompt else {"GIT_TERMINAL_PROMPT": "0"})
+
+
+def ref_exists(root: Path, ref: str) -> bool:
+    return git_ok("rev-parse", "--verify", "-q", ref, cwd=root)
+
+
+def seconds_since_fetch(root: Path) -> float | None:
+    path = root / git("rev-parse", "--git-path", "FETCH_HEAD", cwd=root)
+    return time.time() - path.stat().st_mtime if path.exists() else None
 
 
 def local_tree(root: Path, prefix: str) -> str:
@@ -105,6 +125,23 @@ def incoming(root: Path, remote_ref: str, limit: int = 10) -> list[str]:
         "log", f"--format=%h  %s  (%an, %ar)", f"HEAD..{remote_ref}", cwd=root
     )
     return out.splitlines()[:limit] if out else []
+
+
+def incoming_commits(root: Path, remote_ref: str) -> list[dict]:
+    out = git("log", "--format=%h%x1f%an%x1f%at%x1f%s", f"HEAD..{remote_ref}",
+              cwd=root)
+    commits = []
+    for line in out.splitlines():
+        sha, author, at, subject = line.split("\x1f", 3)
+        commits.append({"sha": sha, "author": author, "time": int(at),
+                        "subject": subject})
+    return commits
+
+
+def incoming_files(root: Path, remote_ref: str) -> list[str]:
+    """Paths, relative to the project root, touched by unmerged remote commits."""
+    out = git("log", "--format=", "--name-only", f"HEAD..{remote_ref}", cwd=root)
+    return list(dict.fromkeys(line for line in out.splitlines() if line))
 
 
 def outgoing(root: Path, remote_ref: str, prefix: str) -> list[Entry]:
