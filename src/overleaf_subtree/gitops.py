@@ -133,6 +133,16 @@ def publish(root: Path, remote: str, branch: str, remote_ref: str,
     return commit
 
 
+def record_published(root: Path, commit: str, message: str) -> None:
+    """Merge the published commit into HEAD, keeping HEAD's tree unchanged.
+
+    Without this, the next pull merges against the project as it was *before*
+    the push, and a coauthor's edit next to lines you just published
+    conflicts with your own change.
+    """
+    git("merge", "-q", "-s", "ours", "--no-edit", "-m", message, commit, cwd=root)
+
+
 # ---------------------------------------------------------------- worktree
 
 def staged_anywhere(root: Path) -> bool:

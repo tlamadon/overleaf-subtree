@@ -157,7 +157,11 @@ possible.
 
 **Push sends one commit built from the prefix's tree**, parented on the
 project's current tip, via `git commit-tree`. It is fast-forward by
-construction.
+construction. Afterwards that commit is merged back into your branch with
+`git merge -s ours`, which leaves your files untouched but records that
+Overleaf now holds your version. Without that record, the next pull would
+compare against the project as it was before your push, and a coauthor's edit
+next to lines you had just published would conflict with your own change.
 
 The obvious alternative is to publish a rewritten history with `git subtree
 split`. Don't. Its output travels to Overleaf and returns on your next pull as

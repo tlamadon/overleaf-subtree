@@ -219,6 +219,7 @@ def cmd_push(args) -> int:
     commit = g.publish(root, cfg.remote, cfg.branch, ref, cfg.prefix,
                        f"Sync {cfg.prefix}/ from {head} ({branch})")
     print(f"Published {cfg.prefix}/ to Overleaf as {commit[:7]}.")
+    g.record_published(root, commit, f"Record publishing {cfg.prefix}/ to Overleaf")
     return 0
 
 
