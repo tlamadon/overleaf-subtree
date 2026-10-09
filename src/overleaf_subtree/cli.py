@@ -55,6 +55,17 @@ def _print_entries(cfg: Config, entries) -> None:
             )
 
 
+AUTH_HELP = """\
+Check the project link first.  Overleaf's git access needs a plan that
+includes git integration, and a git authentication token, which you create
+under Account Settings > Git Integration.  Git asks for it as the password
+(the username is 'git').  To store it, make sure a credential helper is set
+(git config --global credential.helper), then run this once in a terminal
+and paste the token when asked:
+
+  git ls-remote {url}"""
+
+
 def _project_url(project: str) -> str:
     """Accept a project ID, its editor link, or its git URL."""
     project = project.strip().rstrip("/")
@@ -112,7 +123,12 @@ def cmd_init(args) -> int:
         raise ConfigError(f"'{prefix}' must be a subdirectory inside the repository")
 
     print("Contacting Overleaf...")
-    branch = args.branch or raw.get("branch") or g.default_branch(root, url)
+    try:
+        detected = g.default_branch(root, url, prompt=sys.stdin.isatty())
+    except g.GitError as exc:
+        raise ConfigError(f"could not reach the Overleaf project.\n{exc}\n\n"
+                          + AUTH_HELP.format(url=url)) from None
+    branch = args.branch or raw.get("branch") or detected
 
     if add_remote:
         g.git("remote", "add", remote, url, cwd=root)
@@ -142,8 +158,9 @@ def cmd_init(args) -> int:
         try:
             g.join_subtree(root, ref, prefix, f"Join Overleaf project into {prefix}/")
         except g.GitError:
+            then = "'subleaf agent-setup'" if args.agents else "'subleaf status'"
             print("\nFiles that differ on the two sides conflict.  Resolve them, "
-                  "'git commit', then run 'subleaf status'.", file=sys.stderr)
+                  f"'git commit', then run {then}.", file=sys.stderr)
             return 1
 
     print("\nDone.  'subleaf pull' brings in Overleaf edits; 'subleaf push' publishes "

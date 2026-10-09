@@ -26,6 +26,11 @@ class GitError(RuntimeError):
     pass
 
 
+# Fail instead of asking for credentials: no terminal prompt, and an empty
+# GIT_ASKPASS so git skips core.askpass and SSH_ASKPASS (a GUI dialog).
+NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""}
+
+
 def git(*args: str, cwd: Path, check: bool = True, capture: bool = True,
         timeout: float | None = None, env: dict | None = None) -> str:
     try:
@@ -72,13 +77,14 @@ def remote_url(root: Path, remote: str) -> str:
     return git("remote", "get-url", remote, cwd=root)
 
 
-def default_branch(root: Path, url: str) -> str:
+def default_branch(root: Path, url: str, *, prompt: bool = True) -> str:
     """The branch the remote's HEAD points at.  Overleaf's is ``master``.
 
     Also the first contact with the remote, so a wrong URL or missing
     credentials fail here, before anything has been changed.
     """
-    out = git("ls-remote", "--symref", url, "HEAD", cwd=root)
+    out = git("ls-remote", "--symref", url, "HEAD", cwd=root,
+              env=None if prompt else NO_PROMPT)
     for line in out.splitlines():
         if line.startswith("ref: refs/heads/"):
             return line.split("\t")[0].removeprefix("ref: refs/heads/")
@@ -98,7 +104,7 @@ def fetch(root: Path, remote: str, branch: str, *, timeout: float | None = None,
           prompt: bool = True) -> None:
     """``prompt=False`` fails instead of asking for credentials, for hooks."""
     git("fetch", "-q", remote, branch, cwd=root, timeout=timeout,
-        env=None if prompt else {"GIT_TERMINAL_PROMPT": "0"})
+        env=None if prompt else NO_PROMPT)
 
 
 def ref_exists(root: Path, ref: str) -> bool:
