@@ -35,7 +35,7 @@ class Config:
     #: git remote name for the Overleaf project
     remote: str = "overleaf"
     #: branch on that remote
-    branch: str = "main"
+    branch: str = "master"
     #: paths (glob, relative to the prefix) this repo generates.  A remote
     #: edit to one of these is reported loudly on pull: it will be lost the
     #: next time the generator runs, so it is a warning rather than a merge.
@@ -47,6 +47,33 @@ class Config:
         return f"{self.remote}/{self.branch}"
 
 
+TEMPLATE = """\
+prefix = "{prefix}"{pad}# the subdirectory that maps onto the project root
+remote = "{remote}"
+branch = "{branch}"
+
+# Paths this repo generates (globs, relative to the prefix).  status and push
+# call out Overleaf edits to them, which the next generator run would overwrite.
+# repo_owned = ["figures/generated/*"]
+
+# Commands run before every push; a non-zero exit blocks it.  cwd is the prefix.
+# [[checks]]
+# name = "compile"
+# run = "latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex"
+"""
+
+
+def render(prefix: str, remote: str, branch: str) -> str:
+    pad = " " * max(1, 12 - len(prefix))
+    return TEMPLATE.format(prefix=prefix, pad=pad, remote=remote, branch=branch)
+
+
+def read_raw(root: Path) -> dict:
+    """The config as written, without the checks ``load`` makes."""
+    with (root / CONFIG_NAME).open("rb") as fh:
+        return tomllib.load(fh)
+
+
 def find_root(start: Path | None = None) -> Path:
     """Nearest ancestor holding a config file."""
     here = (start or Path.cwd()).resolve()
@@ -55,7 +82,7 @@ def find_root(start: Path | None = None) -> Path:
             return candidate
     raise ConfigError(
         f"no {CONFIG_NAME} found in {here} or any parent.\n"
-        f"Create one at the repository root; see the README for the schema."
+        f"Run 'subleaf init' at the repository root to create one."
     )
 
 
@@ -84,7 +111,7 @@ def load(root: Path) -> Config:
     return Config(
         prefix=prefix,
         remote=raw.get("remote", "overleaf"),
-        branch=raw.get("branch", "main"),
+        branch=raw.get("branch", "master"),
         repo_owned=tuple(raw.get("repo_owned", ())),
         checks=checks,
     )

@@ -56,6 +56,36 @@ def has_remote(root: Path, remote: str) -> bool:
     return git_ok("remote", "get-url", remote, cwd=root)
 
 
+def toplevel(start: Path) -> Path:
+    return Path(git("rev-parse", "--show-toplevel", cwd=start))
+
+
+def remote_url(root: Path, remote: str) -> str:
+    return git("remote", "get-url", remote, cwd=root)
+
+
+def default_branch(root: Path, url: str) -> str:
+    """The branch the remote's HEAD points at.  Overleaf's is ``master``.
+
+    Also the first contact with the remote, so a wrong URL or missing
+    credentials fail here, before anything has been changed.
+    """
+    out = git("ls-remote", "--symref", url, "HEAD", cwd=root)
+    for line in out.splitlines():
+        if line.startswith("ref: refs/heads/"):
+            return line.split("\t")[0].removeprefix("ref: refs/heads/")
+    return "master"
+
+
+def shares_history(root: Path, remote_ref: str) -> bool:
+    """False until the remote has been joined into this branch once."""
+    return git_ok("merge-base", "HEAD", remote_ref, cwd=root)
+
+
+def tracked_in_prefix(root: Path, prefix: str) -> bool:
+    return bool(git("ls-files", "--", prefix, cwd=root))
+
+
 def fetch(root: Path, remote: str, branch: str) -> None:
     git("fetch", "-q", remote, branch, cwd=root)
 
@@ -124,6 +154,22 @@ def merge_in(root: Path, remote: str, branch: str, prefix: str, message: str) ->
     )
 
 
+def import_subtree(root: Path, remote_ref: str, prefix: str, message: str) -> None:
+    """First join, into an empty prefix: the project's files, its history kept."""
+    git("merge", "-q", "-s", "ours", "--no-commit", "--allow-unrelated-histories",
+        remote_ref, cwd=root)
+    git("read-tree", f"--prefix={prefix}/", "-u", remote_ref, cwd=root)
+    git("commit", "-q", "-m", message, cwd=root)
+
+
+def join_subtree(root: Path, remote_ref: str, prefix: str, message: str) -> None:
+    """First join, into a prefix that already has files: an ordinary merge
+    with no common ancestor, so any file that differs on the two sides
+    conflicts and is left for the user to resolve."""
+    git("merge", "--no-ff", "--allow-unrelated-histories", f"-Xsubtree={prefix}",
+        remote_ref, "-m", message, cwd=root, capture=False)
+
+
 def publish(root: Path, remote: str, branch: str, remote_ref: str,
             prefix: str, message: str) -> str:
     """Push the prefix's tree as one commit on top of the remote tip."""
@@ -146,7 +192,8 @@ def record_published(root: Path, commit: str, message: str) -> None:
 # ---------------------------------------------------------------- worktree
 
 def staged_anywhere(root: Path) -> bool:
-    return not git_ok("diff-index", "--cached", "--quiet", "HEAD", "--", cwd=root)
+    # Compares against HEAD, or the empty tree in a repo with no commits yet.
+    return not git_ok("diff", "--cached", "--quiet", cwd=root)
 
 
 def dirty_prefix(root: Path, prefix: str) -> bool:

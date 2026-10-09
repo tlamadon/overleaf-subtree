@@ -4,12 +4,13 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 from . import gitops as g
-from .config import Config, ConfigError, find_root, load
+from .config import CONFIG_NAME, Config, ConfigError, find_root, load, read_raw, render
 
 RESET, BOLD, RED, YELLOW, DIM = "\033[0m", "\033[1m", "\033[31m", "\033[33m", "\033[2m"
 
@@ -51,7 +52,101 @@ def _print_entries(cfg: Config, entries) -> None:
             )
 
 
+def _project_url(project: str) -> str:
+    """Accept a project ID, its editor link, or its git URL."""
+    project = project.strip().rstrip("/")
+    m = re.fullmatch(r"https?://(?:www\.)?overleaf\.com/project/([0-9a-zA-Z]+)", project)
+    if m:
+        project = m.group(1)
+    if "://" in project or project.startswith("git@") or os.path.exists(project):
+        return project
+    return f"https://git@git.overleaf.com/{project}"
+
+
+def _ask(question: str, default: str | None = None) -> str:
+    hint = f" [{default}]" if default else ""
+    while True:
+        try:
+            reply = input(f"{question}{hint}: ").strip()
+        except EOFError:
+            raise ConfigError(
+                "no terminal to ask on.  Pass the answers as flags instead:\n"
+                "  subleaf init --project <link or ID> --prefix <subdirectory>"
+            ) from None
+        if reply or default:
+            return reply or default
+
+
 # ------------------------------------------------------------------ commands
+
+def cmd_init(args) -> int:
+    root = g.toplevel(Path(args.directory or "."))
+    config_path = root / CONFIG_NAME
+    raw = read_raw(root) if config_path.is_file() else {}
+    if raw:
+        print(f"Using the existing {CONFIG_NAME}.")
+
+    if g.staged_anywhere(root):
+        print("Staged changes present; commit or unstage them first.", file=sys.stderr)
+        return 1
+
+    # Gather and validate everything before changing anything.
+    remote = args.remote or raw.get("remote") or "overleaf"
+    add_remote = not g.has_remote(root, remote)
+    if not add_remote:
+        url = g.remote_url(root, remote)
+        if args.project and _project_url(args.project) != url:
+            raise ConfigError(f"remote '{remote}' already points at {url}")
+        print(f"Remote '{remote}' already set: {url}")
+    else:
+        url = _project_url(args.project or _ask(
+            "Overleaf project (its link, or the ID from the address bar)"))
+
+    prefix = (args.prefix or raw.get("prefix")
+              or _ask("Subdirectory of this repo that holds the paper", "paper"))
+    prefix = prefix.strip().strip("/")
+    if prefix in ("", ".") or prefix.startswith("..") or os.path.isabs(prefix):
+        raise ConfigError(f"'{prefix}' must be a subdirectory inside the repository")
+
+    print("Contacting Overleaf...")
+    branch = args.branch or raw.get("branch") or g.default_branch(root, url)
+
+    if add_remote:
+        g.git("remote", "add", remote, url, cwd=root)
+        print(f"Added remote '{remote}': {url}")
+    g.fetch(root, remote, branch)
+    ref = f"{remote}/{branch}"
+
+    if not raw:
+        config_path.write_text(render(prefix, remote, branch))
+        g.git("add", CONFIG_NAME, cwd=root)
+        g.git("commit", "-q", "-m", "Add overleaf-subtree config", "--", CONFIG_NAME,
+              cwd=root)
+        print(f"Wrote and committed {CONFIG_NAME}.")
+
+    if g.shares_history(root, ref):
+        print(f"{prefix}/ is already joined to the Overleaf project.")
+    elif not g.tracked_in_prefix(root, prefix):
+        g.import_subtree(root, ref, prefix, f"Import Overleaf project into {prefix}/")
+        print(f"Imported the Overleaf project into {prefix}/.")
+    else:
+        if g.dirty_prefix(root, prefix):
+            print(f"{prefix}/ has uncommitted changes; commit or stash first:",
+                  file=sys.stderr)
+            print(g.prefix_status(root, prefix), file=sys.stderr)
+            return 1
+        print(f"{prefix}/ already has files; merging the Overleaf project into it.")
+        try:
+            g.join_subtree(root, ref, prefix, f"Join Overleaf project into {prefix}/")
+        except g.GitError:
+            print("\nFiles that differ on the two sides conflict.  Resolve them, "
+                  "'git commit', then run 'subleaf status'.", file=sys.stderr)
+            return 1
+
+    print("\nDone.  'subleaf pull' brings in Overleaf edits; 'subleaf push' publishes "
+          f"yours.\nTo run checks before every push, edit {CONFIG_NAME}.")
+    return 0
+
 
 def cmd_status(args) -> int:
     root, cfg = _setup(args)
@@ -119,6 +214,11 @@ def cmd_pull(args) -> int:
         print(f"{cfg.prefix}/ has uncommitted changes; commit or stash first:",
               file=sys.stderr)
         print(g.prefix_status(root, cfg.prefix), file=sys.stderr)
+        return 1
+    g.fetch(root, cfg.remote, cfg.branch)
+    if not g.shares_history(root, cfg.remote_ref):
+        print(f"{cfg.prefix}/ has never been joined to the Overleaf project; "
+              "run 'subleaf init' first.", file=sys.stderr)
         return 1
     g.merge_in(root, cfg.remote, cfg.branch, cfg.prefix,
                f"Merge Overleaf edits into {cfg.prefix}/")
@@ -234,6 +334,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-C", "--directory", help="run as if started here")
     sub = p.add_subparsers(dest="command", required=True)
 
+    init = sub.add_parser("init", help="connect this repo to an Overleaf project")
+    init.add_argument("--project", help="the project's link, ID, or git URL")
+    init.add_argument("--prefix", help="subdirectory that maps onto the project")
+    init.add_argument("--remote", help="git remote name (default: overleaf)")
+    init.add_argument("--branch", help="remote branch (default: detected)")
+
     sub.add_parser("status", help="what is unmerged, and what a push would change")
     sub.add_parser("diff", help="full content diff against the project")
     sub.add_parser("pull", help="merge the project's commits into this repo")
@@ -251,7 +357,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handler = {
-        "status": cmd_status, "diff": cmd_diff, "pull": cmd_pull,
+        "init": cmd_init, "status": cmd_status, "diff": cmd_diff, "pull": cmd_pull,
         "check": cmd_check, "push": cmd_push,
     }[args.command]
     try:

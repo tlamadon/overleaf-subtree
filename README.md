@@ -12,7 +12,8 @@ myrepo/
 
 ## Bird's-eye view
 
-Two commands cover most of what you will do:
+`subleaf init` connects a subdirectory of your repo to an Overleaf project, once.
+After that, two commands cover most of what you will do:
 
 - **`subleaf pull`** gets the latest version from Overleaf and merges it into your
   repo.
@@ -82,11 +83,18 @@ uv tool install git+https://github.com/tlamadon/overleaf-subtree
 ```
 
 This installs the `subleaf` command (sub*tree* + Over*leaf*). Then, once per
-project:
+project, from inside your repository:
 
 ```sh
-git remote add overleaf https://git@git.overleaf.com/<project-id>
+subleaf init
 ```
+
+It asks for the Overleaf project (paste its link from the browser) and the
+subdirectory that holds the paper, then adds the git remote, writes and commits
+`.overleaf-subtree.toml`, and brings the Overleaf project into that
+subdirectory. If the subdirectory already has files, they are merged, and any
+file that differs on the two sides is left as a conflict for you to resolve.
+The answers can also be given as flags, `--project` and `--prefix`.
 
 Authentication is plain git — a credential helper, or the literal username
 `git` with an Overleaf git token as the password. Requires Overleaf's git
@@ -94,12 +102,13 @@ integration.
 
 ## Configure
 
-`.overleaf-subtree.toml` at the repository root:
+`subleaf init` writes a minimal `.overleaf-subtree.toml` at the repository root.
+Everything it can hold:
 
 ```toml
 prefix = "paper"          # the subdirectory that maps onto the project root
 remote = "overleaf"       # git remote name
-branch = "main"           # branch on that remote
+branch = "master"         # branch on that remote; Overleaf's is master
 
 # Paths this repo generates (globs, relative to the prefix).  An edit made to
 # one of these in the Overleaf editor is lost the next time the generator runs,
