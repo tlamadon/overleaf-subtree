@@ -13,6 +13,7 @@ from pathlib import Path
 from . import agents
 from . import gitops as g
 from . import report
+from . import sync
 from .config import CONFIG_NAME, Config, ConfigError, find_root, load, read_raw, render
 
 RESET, BOLD, RED, YELLOW, DIM = "\033[0m", "\033[1m", "\033[31m", "\033[33m", "\033[2m"
@@ -35,6 +36,13 @@ def _setup(args) -> tuple[Path, Config]:
             f"  git remote add {cfg.remote} https://git@git.overleaf.com/<project-id>"
         )
     return root, cfg
+
+
+def _publish_tree(root: Path, cfg: Config) -> str:
+    """What a whole-tree push may send: HEAD:<prefix> with the paths that must
+    never reach Overleaf (local_only) held at whatever Overleaf has."""
+    ctx = sync.Ctx(root)
+    return sync.publish_tree(ctx, ctx.git.rev(cfg.remote_ref))
 
 
 def _is_repo_owned(cfg: Config, path: str) -> bool:
@@ -193,12 +201,12 @@ def cmd_status(args) -> int:
     n_behind = g.behind(root, ref)
     print(f"  behind  {n_behind} commit(s) on Overleaf not yet ingested\n")
     if n_behind:
-        print("Incoming -- run 'subleaf pull':")
+        print("Incoming -- run 'subleaf pull' (or 'subleaf pull --theirs'):")
         for line in g.incoming(root, ref):
             print(f"    {line}")
         print()
 
-    entries = g.outgoing(root, ref, cfg.prefix)
+    entries = g.outgoing(root, ref, cfg.prefix, _publish_tree(root, cfg))
     if not entries:
         print("Content: identical; nothing to publish.")
     else:
@@ -226,6 +234,8 @@ def cmd_status(args) -> int:
         print(f"\n{cfg.prefix}/ has untracked files -- these will NOT be published:")
         for p in untracked[:10]:
             print(f"    {p}")
+    # What the incoming commits touch, local-only files, pairs, artifacts.
+    sync.cmd_status_extra(sync.Ctx(root), args)
     return 0
 
 
@@ -262,6 +272,8 @@ def cmd_diff(args) -> int:
 
 def cmd_pull(args) -> int:
     root, cfg = _setup(args)
+    if args.theirs:
+        return sync.cmd_pull_theirs(sync.Ctx(root), args)
     if g.staged_anywhere(root):
         print("Staged changes present; commit or unstage them first.", file=sys.stderr)
         return 1
@@ -287,6 +299,8 @@ def cmd_pull(args) -> int:
 
 def cmd_check(args) -> int:
     root, cfg = _setup(args)
+    if getattr(args, "report", False):
+        return sync.cmd_check(sync.Ctx(root), args)
     if not cfg.checks:
         print("No checks configured.")
         return 0
@@ -309,6 +323,12 @@ def cmd_check(args) -> int:
 
 def cmd_push(args) -> int:
     root, cfg = _setup(args)
+    if args.paths or args.pairs or args.delete:
+        # Targeted push: the named files only, on top of Overleaf's tree.
+        return sync.push_files(
+            sync.Ctx(root), args.paths, assume_yes=args.yes, dry_run=args.dry_run,
+            show_diff=args.diff, delete=args.delete, all_pairs=args.pairs,
+            rebuild=not args.no_rebuild)
 
     if g.staged_anywhere(root):
         print("Staged changes present; commit or unstage them first.", file=sys.stderr)
@@ -332,7 +352,8 @@ def cmd_push(args) -> int:
               file=sys.stderr)
         return 1
 
-    entries = g.outgoing(root, ref, cfg.prefix)
+    tree = _publish_tree(root, cfg)
+    entries = g.outgoing(root, ref, cfg.prefix, tree)
     if not entries:
         print("Overleaf is already up to date; nothing to push.")
         return 0
@@ -344,7 +365,7 @@ def cmd_push(args) -> int:
     if owned:
         print(_c(f"\n  {len(owned)} repo-owned file(s) above were edited there and "
                  f"would be replaced.", YELLOW))
-    print(f"\n{g.shortstat(root, ref, cfg.prefix)}\n")
+    print(f"\n{g.shortstat(root, ref, cfg.prefix, tree)}\n")
 
     if args.dry_run:
         print("Dry run; nothing was pushed.  Rerun with --yes to publish.")
@@ -362,7 +383,7 @@ def cmd_push(args) -> int:
             if reply.lower() == "d":
                 pager = os.environ.get("PAGER", "less -R")
                 subprocess.run(f"{pager}", shell=True, text=True,
-                               input=g.full_diff(root, ref, cfg.prefix))
+                               input=g.full_diff(root, ref, cfg.prefix, tree))
                 continue
             break
     if reply.lower() != "y":
@@ -372,10 +393,25 @@ def cmd_push(args) -> int:
     head = g.git("rev-parse", "--short", "HEAD", cwd=root)
     branch = g.git("rev-parse", "--abbrev-ref", "HEAD", cwd=root)
     commit = g.publish(root, cfg.remote, cfg.branch, ref, cfg.prefix,
-                       f"Sync {cfg.prefix}/ from {head} ({branch})")
+                       f"Sync {cfg.prefix}/ from {head} ({branch})", tree)
     print(f"Published {cfg.prefix}/ to Overleaf as {commit[:7]}.")
     g.record_published(root, commit, f"Record publishing {cfg.prefix}/ to Overleaf")
     return 0
+
+
+def cmd_pairs(args) -> int:
+    root, _ = _setup(args)
+    return sync.cmd_pairs(sync.Ctx(root), args)
+
+
+def cmd_accept(args) -> int:
+    root, _ = _setup(args)
+    return sync.cmd_accept(sync.Ctx(root), args)
+
+
+def cmd_latexdiff(args) -> int:
+    root, _ = _setup(args)
+    return sync.cmd_latexdiff(sync.Ctx(root), args)
 
 
 # ------------------------------------------------------------------- parser
@@ -403,6 +439,8 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--json", action="store_true", help="everything, as JSON")
     status.add_argument("--cached", action="store_true",
                         help="don't contact Overleaf; use the last fetch")
+    status.add_argument("--all", action="store_true",
+                        help="name every local-only file instead of counting them")
 
     agent = sub.add_parser("agent-setup",
                            help="show Claude Code and Codex the Overleaf status")
@@ -410,14 +448,57 @@ def build_parser() -> argparse.ArgumentParser:
                        help="also show it in Claude Code's status line")
 
     sub.add_parser("diff", help="full content diff against the project")
-    sub.add_parser("pull", help="merge the project's commits into this repo")
-    sub.add_parser("check", help="run the configured checks")
+    pull = sub.add_parser("pull", help="merge the project's commits into this repo")
+    pull.add_argument("--theirs", action="store_true",
+                      help="Overleaf wins: take its version of every file it has, "
+                           "then reconcile pairs and report what got worse")
+    pull.add_argument("--no-check", action="store_true",
+                      help="with --theirs: skip the post-pull check")
+    pull.add_argument("--no-offer", action="store_true",
+                      help="with --theirs: do not offer to push a rebuilt PDF")
+
+    check = sub.add_parser("check", help="run the configured checks")
+    check.add_argument("--report", action="store_true",
+                       help="compare with the previous sync and print only what got "
+                            "worse; never fails")
+    check.add_argument("--no-store", action="store_true",
+                       help="with --report: do not record the results as the baseline")
 
     push = sub.add_parser("push", help="review the outgoing change, then publish")
     push.add_argument("--yes", action="store_true", help="skip the confirmation")
     push.add_argument("--no-check", action="store_true", help="skip the checks")
     push.add_argument("--dry-run", action="store_true",
                       help="run the checks and show the review, then stop")
+    push.add_argument("paths", nargs="*", metavar="PATH",
+                      help="publish only these files (relative to the project or "
+                           "the repo; a pair's local name works too), then merge back")
+    push.add_argument("--pairs", action="store_true",
+                      help="publish every pair whose local copy is ahead")
+    push.add_argument("--delete", action="store_true",
+                      help="named paths that no longer exist locally are deleted "
+                           "on Overleaf")
+    push.add_argument("--diff", action="store_true",
+                      help="with PATHs: print the full diff in the review")
+    push.add_argument("--no-rebuild", action="store_true",
+                      help="with PATHs: do not rebuild a deck PDF whose sources go out")
+
+    pairs = sub.add_parser("pairs", help="working copies kept outside the prefix")
+    pairs.add_argument("action", nargs="?", choices=["init", "take-remote", "resolved"])
+    pairs.add_argument("paths", nargs="*", metavar="PATH")
+    pairs.add_argument("--no-commit", action="store_true",
+                       help="with init: write the state file but do not commit it")
+
+    accept = sub.add_parser("accept", help="strip \\new{...} review wrappers")
+    accept.add_argument("files", nargs="*", metavar="FILE")
+    accept.add_argument("-n", "--dry-run", action="store_true")
+    accept.add_argument("--lines", help="only wrappers starting in START:END")
+    accept.add_argument("--macro", default="new")
+
+    ldiff = sub.add_parser("latexdiff", help="diff PDF between two versions")
+    ldiff.add_argument("rev1")
+    ldiff.add_argument("rev2")
+    ldiff.add_argument("file", nargs="?", help="root .tex (default: the main document)")
+    ldiff.add_argument("-o", "--output", help="where to write the PDF")
 
     return p
 
@@ -428,11 +509,15 @@ def main(argv: list[str] | None = None) -> int:
         "init": cmd_init, "status": cmd_status, "agent-setup": cmd_agent_setup,
         "diff": cmd_diff, "pull": cmd_pull,
         "check": cmd_check, "push": cmd_push,
+        "pairs": cmd_pairs, "accept": cmd_accept, "latexdiff": cmd_latexdiff,
     }[args.command]
     try:
         return handler(args)
     except (ConfigError, g.GitError) as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except sync.SyncError as exc:
+        print(exc, file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         print("\nInterrupted; nothing was pushed.", file=sys.stderr)

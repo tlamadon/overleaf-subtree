@@ -84,6 +84,14 @@ has commits you have not merged, rather than discarding them. Both `pull` and
 are never published, and `status` lists them so their absence is not a
 surprise.
 
+**For projects where Overleaf is the source of truth.** `pull --theirs` takes
+Overleaf's version of everything it has, tolerates the PDFs your editor
+rebuilds in place, and tells you who changed which sections and what got worse
+in the build. `push FILE...` publishes only the files you name. `local_only`
+keeps your own notes and scripts out of the project, and *pairs* keep a working
+copy elsewhere in the repo (a talk deck) in step with its copy on Overleaf. See
+[When Overleaf is the source of truth](#when-overleaf-is-the-source-of-truth).
+
 **Plain git underneath.** No web API, no scraping, no cookie jar, and no
 dependencies beyond the standard library. Authentication is whatever your git
 credential helper already does, and every command is one you could have typed
@@ -140,7 +148,43 @@ name = "no multiply-defined labels"
 run = "! grep -q 'multiply defined' paper.log"
 ```
 
-Nothing in the tool knows about LaTeX. The checks are yours.
+The core knows nothing about LaTeX; the checks are yours. The optional keys
+below, all for the [Overleaf-wins workflow](#when-overleaf-is-the-source-of-truth),
+are where LaTeX comes in (reading the log, rebuilding a deck). Top-level keys go
+above the first `[[checks]]`.
+
+```toml
+main = "paper.tex"        # root document; found automatically if there is only one
+
+# Never added to Overleaf.  A matching file Overleaf already has is shared and
+# syncs normally.
+local_only = ["notes/**", "scripts/**"]
+
+# Tracked build products an editor may rewrite in place.  Anything not matched
+# here is source, and a dirty source file stops 'pull --theirs'.
+artifacts = ["**/*.pdf"]
+
+# backup_dir = "~/.local/state/subleaf/<repo>"   # where replaced artifacts are saved
+# state_file = ".overleaf-state.json"            # committed bookkeeping
+
+[pdf]
+policy = "rebuild"        # or "never": do not push compiled PDFs of pairs
+build = "latexmk -pdf -interaction=nonstopmode -halt-on-error"
+
+[post_pull]
+# check = "make check"    # default: the [[checks]] above
+# log = "paper.log"       # default: the main document's log
+
+[[pair]]
+local = "slides/talk.tex"            # relative to the repository
+remote = "slides/talk.tex"           # relative to the Overleaf project
+pdf = "slides/talk.pdf"              # its compiled copy in the project, if any
+
+[[pair]]                             # several files with the same names
+local_dir = "slides/graphs"
+remote_dir = "slides/graphs"
+files = ["fig1.pdf", "fig2.pdf"]
+```
 
 ## Use
 
@@ -151,6 +195,13 @@ subleaf diff      # full content diff against the project
 subleaf pull      # merge the project's commits into this repo
 subleaf check     # run the checks, no network
 subleaf push      # review the outgoing change, confirm, publish
+
+subleaf pull --theirs      # Overleaf wins: its version of every file it has
+subleaf push FILE...       # publish only these files, then merge back
+subleaf pairs              # working copies kept outside the prefix
+subleaf check --report     # only what got worse since the previous sync
+subleaf accept             # strip \new{...} review markup
+subleaf latexdiff A B      # diff PDF between two versions
 ```
 
 `push --dry-run` runs the checks and prints the review, then stops. `push
@@ -169,6 +220,76 @@ This push would change the Overleaf project as follows.
 
 Push to Overleaf? [y/N/d=show full diff]
 ```
+
+## When Overleaf is the source of truth
+
+`pull` and `push` treat the two sides as equals: a 3-way merge in, the whole
+prefix out. Many collaborations are not like that. The coauthors work on
+Overleaf, their version is the reference, and only a few files ever go back.
+
+```sh
+subleaf pull --theirs          # Overleaf's version of everything it has
+# ... edit ...
+subleaf push paper.tex         # publish exactly this, then merge back
+```
+
+**`pull --theirs`** makes the prefix equal the project for every path Overleaf
+has, in one merge commit, verified before anything moves.
+
+- Local commits to Overleaf's files that were never pushed are overwritten.
+  They are listed, with the `git show` that recovers them. Publish before you
+  pull to keep an edit.
+- Files that exist only here are kept: `local_only`, and files added but not
+  pushed yet. A file a coauthor deleted is deleted here.
+- A dirty file matching `artifacts` does not block it. It is left alone if
+  Overleaf did not change it; otherwise it is saved under `backup_dir` and
+  replaced. A dirty source file stops the pull unless it already equals the
+  incoming version.
+- The merge message replaces "Update on Overleaf." with each incoming commit's
+  author, time and files, and for `.tex` files the sections (or beamer frames)
+  the change touched.
+- Afterwards the checks run without blocking, and only what got **worse** since
+  the previous sync is printed: the checks newly failing, new errors, new
+  undefined references, new overfull boxes. `subleaf check --report` does this
+  on its own.
+
+**`push FILE...`** publishes Overleaf's current tree with the named paths
+replaced, so nothing else can ride along. Paths are relative to the project
+(`paper.tex`) or the repo (`paper/paper.tex`). The content is what is on disk,
+committed or not. It shows the same review as `push`, re-fetches before pushing
+and stops if Overleaf moved, then merges back and verifies the prefix against
+the project. `--dry-run` and `--yes` work as for `push`; `--diff` prints the
+full diff; `--delete` removes a named file from the project.
+
+Overleaf sometimes answers a large push with `Request timed out` and applies it
+anyway. A failed push is never retried blind: `subleaf` re-fetches and compares
+trees, treats an applied push as done, and retries only if the project is
+verifiably unchanged.
+
+**Pairs** are for a file edited outside the prefix with a copy inside the
+project, such as a talk deck built in `slides/`. On `pull --theirs`, a change
+on Overleaf fast-forwards the working copy; if both changed they are merged
+with `git merge-file` against the last-synced version; a real conflict leaves
+markers in the working copy (the original is backed up), the pull completes
+with exit status 2, and `subleaf pairs resolved PATH` or
+`subleaf pairs take-remote PATH` settles it. `subleaf push slides/talk.tex`
+publishes a pair by its local name, and `push --pairs` every pair that is
+ahead. With `pdf` set and `[pdf] policy = "rebuild"`, the compiled PDF stored
+in the project is rebuilt when its sources change in either direction.
+
+**Review markup.** Define `\newcommand{\new}[1]{\textcolor{red}{#1}}` in the
+manuscript and mark proposed edits with it. `subleaf accept` replaces every
+`\new{X}` by `X` with balanced braces and leaves any other `\textcolor` alone
+(`--dry-run` lists them, `--lines A:B` restricts the range).
+`subleaf latexdiff REV1 REV2` builds a diff PDF between two versions; each may
+be an Overleaf commit or a commit of this repo.
+
+`.overleaf-state.json` holds what has to survive between runs: per pair, the
+blob both copies last agreed on, and the previous check results. It is
+committed, folded into the pull's merge commit.
+
+`tests/test_sync.sh` runs all of this against a throwaway stand-in for the
+Overleaf project.
 
 ## Using it from a coding agent
 
@@ -288,4 +409,7 @@ overwritten.
   one of the web-API tools above.
 - Untracked files under the prefix are never published. `status` lists them.
 - Conflicts are resolved by you, in the working tree, with git. The tool will
-  not merge unattended.
+  not merge unattended. (`pull --theirs` does not merge the prefix at all; it
+  takes Overleaf's version.)
+- `check --report`, `accept` and `latexdiff` assume LaTeX. Section names in
+  merge messages come from `\section`, `\subsection` and beamer frame titles.

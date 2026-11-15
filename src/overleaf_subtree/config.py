@@ -56,10 +56,26 @@ branch = "{branch}"
 # call out Overleaf edits to them, which the next generator run would overwrite.
 # repo_owned = ["figures/generated/*"]
 
+# Files under the prefix that must never be added to Overleaf (your own notes,
+# generator scripts).  push leaves them out; status counts them apart.
+# local_only = ["notes/**"]
+
+# Tracked build products an editor rewrites in place.  A dirty one does not
+# block 'pull --theirs': it is left alone, or backed up and replaced.
+# artifacts = ["**/*.pdf"]
+
 # Commands run before every push; a non-zero exit blocks it.  cwd is the prefix.
 # [[checks]]
 # name = "compile"
 # run = "latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex"
+
+# A working copy kept elsewhere in the repo and its copy in the project.
+# 'pull --theirs' keeps them in step; 'push slides/talk.tex' publishes it.
+# See the README, "When Overleaf is the source of truth", for [pdf] and
+# [post_pull].
+# [[pair]]
+# local = "slides/talk.tex"
+# remote = "slides/talk.tex"
 """
 
 

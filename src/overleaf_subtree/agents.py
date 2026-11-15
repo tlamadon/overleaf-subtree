@@ -34,6 +34,14 @@ editing anything under `{prefix}/`. For the details, run `subleaf status --json`
   `subleaf push --yes` only after the user approves that list. If push reports
   unmerged Overleaf commits, pull first, then start again from the dry run.
 - Never run `subleaf push --yes` before the user has seen the dry run.
+- If the user treats Overleaf as the source of truth, pull with
+  `subleaf pull --theirs` (Overleaf's version replaces local changes to its
+  files; the output lists what was overwritten and what got worse), and publish
+  only named files: `subleaf push --dry-run FILE...`, then
+  `subleaf push --yes FILE...` once approved. An uncommitted file can be pushed.
+- Exit status 2 from `subleaf pull --theirs` means the pull is complete but a
+  paired file has a conflict: resolve it in the working copy, then run
+  `subleaf pairs resolved PATH`.
 {end}
 """
 

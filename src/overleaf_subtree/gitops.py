@@ -150,14 +150,17 @@ def incoming_files(root: Path, remote_ref: str) -> list[str]:
     return list(dict.fromkeys(line for line in out.splitlines() if line))
 
 
-def outgoing(root: Path, remote_ref: str, prefix: str) -> list[Entry]:
+def outgoing(root: Path, remote_ref: str, prefix: str,
+             tree: str | None = None) -> list[Entry]:
     """The change publishing would make to the project.
 
     Compares the remote's root tree against ``HEAD:<prefix>``.  Both hold the
     same paths, so they diff directly -- no history rewriting required.
+    ``tree`` replaces ``HEAD:<prefix>`` when some paths are held back
+    (``local_only``).
     """
     raw = git(
-        "diff", "--name-status", remote_ref, f"HEAD:{prefix}", cwd=root
+        "diff", "--name-status", remote_ref, tree or f"HEAD:{prefix}", cwd=root
     )
     entries: list[Entry] = []
     for line in raw.splitlines():
@@ -175,12 +178,12 @@ def outgoing(root: Path, remote_ref: str, prefix: str) -> list[Entry]:
     return entries
 
 
-def shortstat(root: Path, remote_ref: str, prefix: str) -> str:
-    return git("diff", "--shortstat", remote_ref, f"HEAD:{prefix}", cwd=root)
+def shortstat(root: Path, remote_ref: str, prefix: str, tree: str | None = None) -> str:
+    return git("diff", "--shortstat", remote_ref, tree or f"HEAD:{prefix}", cwd=root)
 
 
-def full_diff(root: Path, remote_ref: str, prefix: str) -> str:
-    return git("diff", remote_ref, f"HEAD:{prefix}", cwd=root)
+def full_diff(root: Path, remote_ref: str, prefix: str, tree: str | None = None) -> str:
+    return git("diff", remote_ref, tree or f"HEAD:{prefix}", cwd=root)
 
 
 def remote_is_ancestor(root: Path, remote_ref: str) -> bool:
@@ -214,9 +217,9 @@ def join_subtree(root: Path, remote_ref: str, prefix: str, message: str) -> None
 
 
 def publish(root: Path, remote: str, branch: str, remote_ref: str,
-            prefix: str, message: str) -> str:
+            prefix: str, message: str, tree: str | None = None) -> str:
     """Push the prefix's tree as one commit on top of the remote tip."""
-    tree = local_tree(root, prefix)
+    tree = tree or local_tree(root, prefix)
     commit = git("commit-tree", tree, "-p", remote_ref, "-m", message, cwd=root)
     git("push", remote, f"{commit}:{branch}", cwd=root, capture=False)
     return commit

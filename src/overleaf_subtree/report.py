@@ -65,10 +65,28 @@ def gather(root: Path, cfg: Config, *, fetch: bool) -> dict:
     report["outgoing"] = [
         {"status": e.status[0], "path": e.path, "last_touched": e.last_touched}
         for e in g.outgoing(root, base, cfg.prefix)
+        if not _local_only(root, ref, e.path)
     ]
     report["diverged"] = bool(report["incoming"]["commits"] and report["outgoing"])
     report["summary"] = summarize(report)
     return report
+
+
+_LOCAL_ONLY_CACHE: dict = {}
+
+
+def _local_only(root: Path, ref: str, path: str) -> bool:
+    """A file under the prefix that is never published is not outgoing."""
+    key = (str(root), ref)
+    if key not in _LOCAL_ONLY_CACHE:
+        try:
+            from . import sync
+            ctx = sync.Ctx(root)
+            _LOCAL_ONLY_CACHE[key] = (ctx.cfg, ctx.git.ls_tree(ref))
+        except Exception:      # a status line must never fail on a config slip
+            _LOCAL_ONLY_CACHE[key] = None
+    cached = _LOCAL_ONLY_CACHE[key]
+    return bool(cached) and cached[0].is_local_only(path, cached[1])
 
 
 def _paths(paths: list[str], limit: int = 3) -> str:
